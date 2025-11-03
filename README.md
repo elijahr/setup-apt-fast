@@ -13,6 +13,11 @@ Add this step to your workflow before installing packages:
 ```yaml
 - name: Setup apt-fast
   uses: elijahr/setup-apt-fast@v1
+
+- name: Install dependencies
+  run: |
+    sudo apt-fast update
+    sudo apt-fast install -y <all the things>
 ```
 
 ## Configuration
