@@ -1,0 +1,81 @@
+name: Update Major Version Tags
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to process (e.g., v1.2.3)'
+        required: true
+        type: string
+
+jobs:
+  update-major-tag:
+    name: Update major version tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine tag to process
+        id: determine-tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${{ github.event.release.tag_name }}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Processing tag: $TAG"
+
+      - name: Update major version tag
+        env:
+          TAG: ${{ steps.determine-tag.outputs.tag }}
+        run: |
+          # Extract major version from tag (e.g., v1.2.3 -> v1)
+          if [[ $TAG =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+            MAJOR_VERSION="v${BASH_REMATCH[1]}"
+            echo "Major version: $MAJOR_VERSION"
+
+            # Configure git
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+
+            # Delete the major version tag if it exists (both locally and remotely)
+            git tag -d "$MAJOR_VERSION" 2>/dev/null || true
+            git push origin ":refs/tags/$MAJOR_VERSION" 2>/dev/null || true
+
+            # Create new major version tag pointing to the current release tag
+            git tag -a "$MAJOR_VERSION" -m "Update $MAJOR_VERSION to $TAG"
+
+            # Push the updated major version tag
+            git push origin "$MAJOR_VERSION"
+
+            echo "Successfully updated $MAJOR_VERSION to point to $TAG"
+          else
+            echo "Tag $TAG does not match expected format (vX.Y.Z)"
+            exit 1
+          fi
+
+      - name: Create summary
+        env:
+          TAG: ${{ steps.determine-tag.outputs.tag }}
+        run: |
+          if [[ $TAG =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+            MAJOR_VERSION="v${BASH_REMATCH[1]}"
+            echo "## Tag Update Summary" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "✅ Successfully updated major version tag" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "- Release tag: \`$TAG\`" >> $GITHUB_STEP_SUMMARY
+            echo "- Major version tag: \`$MAJOR_VERSION\` → \`$TAG\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Users can now reference this action with:" >> $GITHUB_STEP_SUMMARY
+            echo "- \`uses: ${{ github.repository }}@$TAG\` (exact version)" >> $GITHUB_STEP_SUMMARY
+            echo "- \`uses: ${{ github.repository }}@$MAJOR_VERSION\` (latest in major version)" >> $GITHUB_STEP_SUMMARY
+          fi
