@@ -1,0 +1,189 @@
+---
+name: 'Setup apt-fast'
+description: 'Install and configure apt-fast to speed up apt package downloads using parallel connections'
+author: 'Your Name'
+
+branding:
+  icon: 'download'
+  color: 'blue'
+
+inputs:
+  apt-manager:
+    description: 'Package manager to use (apt-get, aptitude, or apt)'
+    required: false
+    default: 'apt-get'
+  max-downloads:
+    description: 'Maximum number of connections aria2c uses'
+    required: false
+    default: '16'
+  max-connections-per-server:
+    description: 'Maximum number of connections per server'
+    required: false
+    default: '10'
+  split-connections:
+    description: 'Maximum number of connections per file'
+    required: false
+    default: '16'
+  min-split-size:
+    description: 'Size of each split piece (e.g., 1M, 5M, 10M)'
+    required: false
+    default: '1M'
+  piece-algorithm:
+    description: 'Piece selection algorithm (default, inorder, or geom)'
+    required: false
+    default: 'default'
+  download-before:
+    description: 'Skip confirmation dialog (true/false)'
+    required: false
+    default: 'true'
+  mirrors:
+    description: 'Comma or space-separated list of mirror URLs to use'
+    required: false
+    default: ''
+  verbose-output:
+    description: 'Display aria2 download file instead of package listing (true/false)'
+    required: false
+    default: 'false'
+  apt-auth:
+    description: 'Enable authentication for sources requiring login (true/false)'
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check OS
+      shell: bash
+      run: |
+        if [[ "$OSTYPE" != "linux-gnu"* ]]; then
+          echo "::error::This action only works on Linux runners (Ubuntu/Debian)"
+          exit 1
+        fi
+
+        if ! command -v apt-get &> /dev/null; then
+          echo "::error::apt-get not found. This action requires Ubuntu or Debian-based runners"
+          exit 1
+        fi
+
+    - name: Install apt-fast
+      shell: bash
+      env:
+        APT_MANAGER: ${{ inputs.apt-manager }}
+        MAX_DOWNLOADS: ${{ inputs.max-downloads }}
+        MAX_CONN_PER_SERVER: ${{ inputs.max-connections-per-server }}
+        SPLIT_CONN: ${{ inputs.split-connections }}
+        MIN_SPLIT_SIZE: ${{ inputs.min-split-size }}
+        PIECE_ALGO: ${{ inputs.piece-algorithm }}
+        DOWNLOAD_BEFORE: ${{ inputs.download-before }}
+        MIRRORS: ${{ inputs.mirrors }}
+        VERBOSE_OUTPUT: ${{ inputs.verbose-output }}
+        APT_AUTH: ${{ inputs.apt-auth }}
+      run: |
+        echo "::group::Installing apt-fast"
+
+        # Install prerequisites
+        sudo apt-get update -qq
+        sudo apt-get install -y software-properties-common
+
+        # Add PPA
+        sudo add-apt-repository -y ppa:apt-fast/stable
+
+        # Install apt-fast non-interactively
+        sudo apt-get update -qq
+        echo debconf apt-fast/maxdownloads string ${MAX_DOWNLOADS} | sudo debconf-set-selections
+        echo debconf apt-fast/dlflag boolean true | sudo debconf-set-selections
+        echo debconf apt-fast/aptmanager string ${APT_MANAGER} | sudo debconf-set-selections
+        DEBIAN_FRONTEND=noninteractive sudo apt-get install -y apt-fast
+
+        echo "::endgroup::"
+
+        # Verify installation
+        if command -v apt-fast &> /dev/null; then
+          echo "::notice::apt-fast successfully installed"
+        else
+          echo "::error::apt-fast installation failed"
+          exit 1
+        fi
+
+    - name: Configure apt-fast
+      shell: bash
+      env:
+        APT_MANAGER: ${{ inputs.apt-manager }}
+        MAX_DOWNLOADS: ${{ inputs.max-downloads }}
+        MAX_CONN_PER_SERVER: ${{ inputs.max-connections-per-server }}
+        SPLIT_CONN: ${{ inputs.split-connections }}
+        MIN_SPLIT_SIZE: ${{ inputs.min-split-size }}
+        PIECE_ALGO: ${{ inputs.piece-algorithm }}
+        DOWNLOAD_BEFORE: ${{ inputs.download-before }}
+        MIRRORS: ${{ inputs.mirrors }}
+        VERBOSE_OUTPUT: ${{ inputs.verbose-output }}
+        APT_AUTH: ${{ inputs.apt-auth }}
+      run: |
+        echo "::group::Configuring apt-fast"
+
+        CONFIG_FILE="/etc/apt-fast.conf"
+
+        # Update package manager
+        sudo sed -i "s|^_APTMGR=.*|_APTMGR=${APT_MANAGER}|" "$CONFIG_FILE"
+
+        # Update max downloads
+        sudo sed -i "s|^_MAXNUM=.*|_MAXNUM=${MAX_DOWNLOADS}|" "$CONFIG_FILE"
+
+        # Update max connections per server
+        sudo sed -i "s|^#*_MAXCONPERSRV=.*|_MAXCONPERSRV=${MAX_CONN_PER_SERVER}|" "$CONFIG_FILE"
+
+        # Update split connections
+        sudo sed -i "s|^#*_SPLITCON=.*|_SPLITCON=${SPLIT_CONN}|" "$CONFIG_FILE"
+
+        # Update min split size
+        sudo sed -i "s|^#*_MINSPLITSZ=.*|_MINSPLITSZ='${MIN_SPLIT_SIZE}'|" "$CONFIG_FILE"
+
+        # Update piece algorithm
+        sudo sed -i "s|^#*_PIECEALGO=.*|_PIECEALGO=${PIECE_ALGO}|" "$CONFIG_FILE"
+
+        # Update download before (confirmation dialog)
+        if [[ "${DOWNLOAD_BEFORE}" == "true" ]]; then
+          sudo sed -i "s|^#*DOWNLOADBEFORE=.*|DOWNLOADBEFORE=true|" "$CONFIG_FILE"
+        else
+          sudo sed -i "s|^DOWNLOADBEFORE=.*|#DOWNLOADBEFORE=|" "$CONFIG_FILE"
+        fi
+
+        # Update verbose output
+        if [[ "${VERBOSE_OUTPUT}" == "true" ]]; then
+          sudo sed -i "s|^#*VERBOSE_OUTPUT=.*|VERBOSE_OUTPUT=y|" "$CONFIG_FILE"
+        else
+          sudo sed -i "s|^VERBOSE_OUTPUT=.*|#VERBOSE_OUTPUT=|" "$CONFIG_FILE"
+        fi
+
+        # Update apt auth
+        if [[ "${APT_AUTH}" == "true" ]]; then
+          sudo sed -i "s|^#*APT_FAST_APT_AUTH=.*|APT_FAST_APT_AUTH=1|" "$CONFIG_FILE"
+        else
+          sudo sed -i "s|^APT_FAST_APT_AUTH=.*|APT_FAST_APT_AUTH=0|" "$CONFIG_FILE"
+        fi
+
+        # Update mirrors if provided
+        if [[ -n "${MIRRORS}" ]]; then
+          # Escape special characters and format mirrors
+          MIRRORS_ESCAPED=$(echo "${MIRRORS}" | sed 's/[&/\]/\\&/g')
+          sudo sed -i "s|^#*MIRRORS=.*|MIRRORS=( '${MIRRORS_ESCAPED}' )|" "$CONFIG_FILE"
+        fi
+
+        echo "::endgroup::"
+        echo "::notice::apt-fast configuration complete"
+
+        # Show configuration summary
+        echo "::group::Configuration Summary"
+        echo "Package Manager: ${APT_MANAGER}"
+        echo "Max Downloads: ${MAX_DOWNLOADS}"
+        echo "Max Connections Per Server: ${MAX_CONN_PER_SERVER}"
+        echo "Split Connections: ${SPLIT_CONN}"
+        echo "Min Split Size: ${MIN_SPLIT_SIZE}"
+        echo "Piece Algorithm: ${PIECE_ALGO}"
+        echo "Skip Confirmation: ${DOWNLOAD_BEFORE}"
+        echo "Verbose Output: ${VERBOSE_OUTPUT}"
+        echo "APT Authentication: ${APT_AUTH}"
+        if [[ -n "${MIRRORS}" ]]; then
+          echo "Mirrors: ${MIRRORS}"
+        fi
+        echo "::endgroup::"

@@ -1,0 +1,13 @@
+# ShellCheck configuration
+# See: https://www.shellcheck.net/wiki/
+
+# Disable specific checks that may not apply to GitHub Actions composite actions
+# SC2148: Tips depend on target shell and yours is unknown. Add a shebang or a 'shell' directive.
+#         (Not needed in GitHub Actions as shell is specified in the workflow)
+disable=SC2148
+
+# Set shell to bash (most common for GitHub Actions)
+shell=bash
+
+# Enable optional checks
+enable=all

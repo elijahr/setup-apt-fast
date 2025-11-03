@@ -1,0 +1,110 @@
+---
+name: Test Action
+
+'on':
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  test-default-config:
+    name: Test with default configuration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup apt-fast (default config)
+        uses: ./
+
+      - name: Verify apt-fast installation
+        run: |
+          if ! command -v apt-fast &> /dev/null; then
+            echo "Error: apt-fast not found"
+            exit 1
+          fi
+          echo "apt-fast successfully installed"
+          apt-fast --version || true
+
+      - name: Test apt-fast with package installation
+        run: |
+          sudo apt-fast update
+          sudo apt-fast install -y curl wget
+
+      - name: Verify installed packages
+        run: |
+          curl --version
+          wget --version
+
+  test-custom-config:
+    name: Test with custom configuration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup apt-fast (custom config)
+        uses: ./
+        with:
+          max-downloads: 20
+          max-connections-per-server: 16
+          split-connections: 20
+          min-split-size: 5M
+          verbose-output: true
+
+      - name: Verify apt-fast installation
+        run: |
+          if ! command -v apt-fast &> /dev/null; then
+            echo "Error: apt-fast not found"
+            exit 1
+          fi
+          echo "apt-fast successfully installed"
+
+      - name: Verify configuration
+        run: |
+          if ! grep -q "_MAXNUM=20" /etc/apt-fast.conf; then
+            echo "Error: max-downloads not configured correctly"
+            exit 1
+          fi
+          if ! grep -q "_MAXCONPERSRV=16" /etc/apt-fast.conf; then
+            echo "Error: max-connections-per-server not configured correctly"
+            exit 1
+          fi
+          echo "Configuration verified successfully"
+
+      - name: Test apt-fast with package installation
+        run: |
+          sudo apt-fast update
+          sudo apt-fast install -y git build-essential
+
+  test-multiple-ubuntu-versions:
+    name: Test on Ubuntu ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-20.04]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup apt-fast
+        uses: ./
+
+      - name: Verify apt-fast installation
+        run: |
+          if ! command -v apt-fast &> /dev/null; then
+            echo "Error: apt-fast not found"
+            exit 1
+          fi
+          echo "apt-fast successfully installed on ${{ matrix.os }}"
+
+      - name: Test package installation
+        run: |
+          sudo apt-fast update
+          sudo apt-fast install -y jq
+
+      - name: Verify installed package
+        run: jq --version

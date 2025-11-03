@@ -1,0 +1,128 @@
+---
+name: Create Release
+
+'on':
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release version (e.g., v1.2.3)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine tag
+        id: determine-tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Creating release for tag: \"$TAG\""
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          TAG="${{ steps.determine-tag.outputs.tag }}"
+
+          # Get previous tag
+          PREV_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -A1 "$TAG" | tail -n1)
+
+          if [ -z "$PREV_TAG" ] || [ "$PREV_TAG" = "$TAG" ]; then
+            echo "No previous tag found, using initial commit"
+            PREV_TAG=$(git rev-list --max-parents=0 HEAD)
+          fi
+
+          echo "Generating changelog from \"$PREV_TAG\" to \"$TAG\""
+
+          # Generate changelog
+          {
+            echo "## What's Changed"
+            echo ""
+            git log "$PREV_TAG".."$TAG" --pretty=format:"* %s (%h)" --reverse
+            echo ""
+            echo ""
+            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$PREV_TAG...$TAG"
+          } > CHANGELOG.md
+
+          cat CHANGELOG.md
+
+          # Set output for later steps
+          {
+            echo "changelog<<EOF"
+            cat CHANGELOG.md
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check if release exists
+        id: check-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.determine-tag.outputs.tag }}"
+          if gh release view "$TAG" &>/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release \"$TAG\" already exists"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Release \"$TAG\" does not exist"
+          fi
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.determine-tag.outputs.tag }}
+          CHANGELOG: ${{ steps.changelog.outputs.changelog }}
+        run: |
+          PRERELEASE_FLAG=""
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.prerelease }}" = "true" ]; then
+            PRERELEASE_FLAG="--prerelease"
+          elif [[ $TAG =~ -[a-z] ]]; then
+            # Auto-detect pre-release based on tag (e.g., v1.0.0-beta, v1.0.0-rc1)
+            PRERELEASE_FLAG="--prerelease"
+          fi
+
+          if [ "${{ steps.check-release.outputs.exists }}" = "true" ]; then
+            echo "Updating existing release..."
+            echo "$CHANGELOG" | gh release edit "$TAG" \
+              --notes-file - \
+              $PRERELEASE_FLAG
+          else
+            echo "Creating new release..."
+            echo "$CHANGELOG" | gh release create "$TAG" \
+              --title "$TAG" \
+              --notes-file - \
+              $PRERELEASE_FLAG
+          fi
+
+      - name: Create summary
+        run: |
+          TAG="${{ steps.determine-tag.outputs.tag }}"
+          {
+            echo "## Release Created Successfully"
+            echo ""
+            echo "- **Tag**: \`${TAG}\`"
+            echo "- **Release URL**: https://github.com/${{ github.repository }}/releases/tag/$TAG"
+            echo ""
+            echo "The major version tag will be automatically updated by the \`update-tags.yml\` workflow."
+          } >> "$GITHUB_STEP_SUMMARY"
