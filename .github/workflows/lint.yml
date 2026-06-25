@@ -13,6 +13,7 @@ name: Lint
       - 'action.yml'
       - '.github/workflows/*.yml'
   workflow_dispatch:
+  workflow_call:
 
 jobs:
   actionlint:
